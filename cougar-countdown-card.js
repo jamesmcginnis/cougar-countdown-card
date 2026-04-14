@@ -64,34 +64,117 @@ class CougarCountdownCard extends HTMLElement {
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
+  /**
+   * Returns { seconds, state, total } for both native timer.* entities
+   * and sensor entities (e.g. sensor.kitchen_next_timer from Google Home /
+   * Alexa integrations).
+   *
+   * Native timer.*:  state = idle | active | paused
+   *                  attrs: duration, remaining, finishes_at
+   *
+   * Sensor timers:   state may be an ISO datetime (fire time),
+   *                  a numeric string (remaining seconds),
+   *                  or a formatted string like "0:05:00".
+   *                  attrs may carry: duration, remaining, status, fire_time, etc.
+   */
   _getRemaining() {
     const stateObj = this._hass?.states[this._config?.entity];
     if (!stateObj) return null;
+
     const state = stateObj.state;
     const attrs = stateObj.attributes;
-    const total = this._parseDuration(attrs.duration || '0:00:00');
 
-    if (state === 'idle')   return { seconds: total, state, total };
-    if (state === 'paused') return { seconds: this._parseDuration(attrs.remaining || '0:00:00'), state, total };
-    if (state === 'active') {
+    // ── Native HA timer entity ───────────────────────────────────────────────
+    if (['idle', 'active', 'paused'].includes(state)) {
+      const total = this._parseDuration(attrs.duration || '0:00:00');
+      if (state === 'idle')   return { seconds: total, state: 'idle',   total };
+      if (state === 'paused') return { seconds: this._parseDuration(attrs.remaining || '0:00:00'), state: 'paused', total };
+      // active
       if (attrs.finishes_at) {
-        return { seconds: Math.max(0, (new Date(attrs.finishes_at) - Date.now()) / 1000), state, total };
+        return { seconds: Math.max(0, (new Date(attrs.finishes_at) - Date.now()) / 1000), state: 'active', total };
       }
-      return { seconds: this._parseDuration(attrs.remaining || '0:00:00'), state, total };
+      return { seconds: this._parseDuration(attrs.remaining || '0:00:00'), state: 'active', total };
     }
-    return null;
+
+    // ── Sensor-based timer (Google Home, Alexa, etc.) ────────────────────────
+
+    // Attempt 1 — state is an ISO datetime string (fire time)
+    // e.g. "2024-05-01T12:34:56+00:00"
+    const asDate = new Date(state);
+    if (!isNaN(asDate.getTime()) && state.includes('T')) {
+      const remaining = Math.max(0, (asDate - Date.now()) / 1000);
+      const total     = this._attrDuration(attrs) || remaining;
+      const timerState = remaining <= 0 ? 'idle' : 'active';
+      return { seconds: remaining, state: timerState, total };
+    }
+
+    // Attempt 2 — attrs.fire_time or attrs.finishes_at is a datetime
+    const fireAttr = attrs.fire_time || attrs.finishes_at || attrs.end_time;
+    if (fireAttr) {
+      const fireDate = new Date(fireAttr);
+      if (!isNaN(fireDate.getTime())) {
+        const remaining = Math.max(0, (fireDate - Date.now()) / 1000);
+        const total     = this._attrDuration(attrs) || remaining;
+        const timerState = remaining <= 0 ? 'idle' : 'active';
+        return { seconds: remaining, state: timerState, total };
+      }
+    }
+
+    // Attempt 3 — attrs.remaining is a duration string or seconds value
+    if (attrs.remaining != null) {
+      const rem   = typeof attrs.remaining === 'number'
+        ? attrs.remaining
+        : this._parseDuration(String(attrs.remaining));
+      const total = this._attrDuration(attrs) || rem;
+      const paused = attrs.status === 'paused' || attrs.paused === true;
+      return { seconds: rem, state: paused ? 'paused' : (rem > 0 ? 'active' : 'idle'), total };
+    }
+
+    // Attempt 4 — state itself is a numeric string (remaining seconds)
+    const asNum = parseFloat(state);
+    if (!isNaN(asNum)) {
+      const total = this._attrDuration(attrs) || asNum;
+      return { seconds: Math.max(0, asNum), state: asNum > 0 ? 'active' : 'idle', total };
+    }
+
+    // Attempt 5 — state is a duration string like "0:05:00" or "5:00"
+    const asDur = this._parseDuration(state);
+    if (asDur > 0) {
+      const total = this._attrDuration(attrs) || asDur;
+      return { seconds: asDur, state: 'active', total };
+    }
+
+    // Unavailable / unknown
+    return { seconds: 0, state: 'idle', total: 0 };
+  }
+
+  /** Try common attribute keys that represent a total duration. */
+  _attrDuration(attrs) {
+    for (const key of ['duration', 'total_duration', 'original_duration', 'total']) {
+      if (attrs[key] != null) {
+        const v = typeof attrs[key] === 'number'
+          ? attrs[key]
+          : this._parseDuration(String(attrs[key]));
+        if (v > 0) return v;
+      }
+    }
+    return 0;
   }
 
   _parseDuration(str) {
     if (!str) return 0;
+    // Already a number
+    const asNum = parseFloat(str);
+    if (!isNaN(asNum) && !str.includes(':')) return asNum;
+    // H:MM:SS or M:SS
     const parts = str.split(':').map(Number);
     if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    if (parts.length === 2) return parts[0] * 60 + parts[1];
-    return Number(parts[0]) || 0;
+    if (parts.length === 2) return parts[0] * 60  + parts[1];
+    return 0;
   }
 
   _formatTime(totalSeconds, showSeconds) {
-    const s    = Math.max(0, Math.ceil(totalSeconds));
+    const s     = Math.max(0, Math.ceil(totalSeconds));
     const hours = Math.floor(s / 3600);
     const mins  = Math.floor((s % 3600) / 60);
     const secs  = s % 60;
@@ -122,12 +205,11 @@ class CougarCountdownCard extends HTMLElement {
     const txt = cfg.text_color   || '#ffffff';
     const bg  = this._bgStyle();
     const R   = 100;
-    const C   = (2 * Math.PI * R).toFixed(2); // ≈ 628.32
+    const C   = (2 * Math.PI * R).toFixed(2);
 
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
-
         ha-card { background: transparent; box-shadow: none; border: none; }
 
         .card {
@@ -146,7 +228,6 @@ class CougarCountdownCard extends HTMLElement {
           box-sizing: border-box;
         }
 
-        /* ── Name label ── */
         .timer-name {
           text-align: center;
           font-size: 15px;
@@ -161,7 +242,6 @@ class CougarCountdownCard extends HTMLElement {
           padding: 0 12px;
         }
 
-        /* ── Ring ── */
         .ring-wrap {
           display: flex;
           align-items: center;
@@ -203,7 +283,6 @@ class CougarCountdownCard extends HTMLElement {
           filter: drop-shadow(0 0 6px ${acc}88);
         }
 
-        /* ── Time digits ── */
         .time-display {
           display: flex;
           flex-direction: column;
@@ -236,7 +315,6 @@ class CougarCountdownCard extends HTMLElement {
           50%       { opacity: 0.75; }
         }
 
-        /* ── State pill ── */
         .state-pill {
           font-size: 10px;
           font-weight: 700;
@@ -289,7 +367,7 @@ class CougarCountdownCard extends HTMLElement {
     const stateObj = cfg?.entity ? this._hass.states[cfg.entity] : null;
 
     if (!stateObj) {
-      if (nameEl) nameEl.textContent = cfg?.entity ? cfg.entity : 'No timer selected';
+      if (nameEl) nameEl.textContent = cfg?.entity ? cfg.entity : 'No entity selected';
       if (timeEl) timeEl.textContent = '--:--';
       if (pillEl) { pillEl.className = 'state-pill idle'; pillEl.textContent = 'Idle'; }
       return;
@@ -355,12 +433,11 @@ class CougarCountdownCardEditor extends HTMLElement {
     if (!this._hass || !this._config) return;
     this._initialized = true;
 
-    const timerEntities = Object.keys(this._hass.states)
-      .filter(e => e.startsWith('timer.'))
-      .sort();
-
     const cfg    = this._config;
     const selEnt = cfg.entity || '';
+
+    // Show all entities — user may use timer.*, sensor.*, input_datetime.*, etc.
+    const allEntities = Object.keys(this._hass.states).sort();
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -380,19 +457,42 @@ class CougarCountdownCardEditor extends HTMLElement {
           border-radius: 12px; overflow: hidden;
         }
 
-        /* ── Select ── */
-        .select-row { padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
-        .select-row label { font-size: 14px; font-weight: 500; }
-        .hint { font-size: 11px; color: #888; }
-        select {
-          width: 100%; background: var(--card-background-color);
+        /* ── Entity picker ── */
+        .entity-picker { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+        .hint { font-size: 11px; color: #888; line-height: 1.4; }
+
+        input[type="text"] {
+          width: 100%; box-sizing: border-box;
+          background: var(--card-background-color);
           color: var(--primary-text-color);
-          border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
-          padding: 10px 12px; font-size: 14px; cursor: pointer;
-          -webkit-appearance: none; appearance: none;
-          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
-          background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px;
+          border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 8px; padding: 10px 12px; font-size: 14px;
         }
+        input[type="text"]:focus { outline: none; border-color: rgba(255,255,255,0.3); }
+
+        .entity-list {
+          max-height: 220px;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 8px;
+          background: var(--card-background-color);
+        }
+        .entity-list.hidden { display: none; }
+
+        .entity-option {
+          padding: 10px 12px;
+          font-size: 13px;
+          cursor: pointer;
+          border-bottom: 1px solid rgba(255,255,255,0.05);
+          display: flex; flex-direction: column; gap: 2px;
+        }
+        .entity-option:last-child { border-bottom: none; }
+        .entity-option:hover, .entity-option.selected {
+          background: rgba(255,255,255,0.07);
+        }
+        .entity-option.selected { color: #FF9F0A; }
+        .entity-option-id { font-size: 11px; opacity: 0.5; font-family: monospace; }
 
         /* ── Toggles ── */
         .toggle-list  { display: flex; flex-direction: column; }
@@ -466,19 +566,25 @@ class CougarCountdownCardEditor extends HTMLElement {
 
       <div class="container">
 
-        <!-- Timer Entity -->
+        <!-- Entity picker -->
         <div>
-          <div class="section-title">Timer Entity</div>
+          <div class="section-title">Entity</div>
           <div class="card-block">
-            <div class="select-row">
-              <div class="hint">Select the timer entity to display</div>
-              <select id="entity">
-                <option value="">— Choose a timer entity —</option>
-                ${timerEntities.map(e => {
-                  const name = this._hass.states[e]?.attributes?.friendly_name || e;
-                  return `<option value="${e}" ${e === selEnt ? 'selected' : ''}>${name} (${e})</option>`;
+            <div class="entity-picker">
+              <div class="hint">Search for any entity — timer.*, sensor.*, input_datetime.* etc.</div>
+              <input type="text" id="entitySearch"
+                placeholder="Search entities…"
+                autocomplete="off" spellcheck="false"
+                value="${selEnt}">
+              <div class="entity-list hidden" id="entityList">
+                ${allEntities.map(e => {
+                  const name = this._hass.states[e]?.attributes?.friendly_name || '';
+                  return `<div class="entity-option${e === selEnt ? ' selected' : ''}" data-id="${e}">
+                    ${name ? `<span>${name}</span>` : ''}
+                    <span class="entity-option-id">${e}</span>
+                  </div>`;
                 }).join('')}
-              </select>
+              </div>
             </div>
           </div>
         </div>
@@ -527,23 +633,57 @@ class CougarCountdownCardEditor extends HTMLElement {
     this._setupListeners();
   }
 
+  _setupListeners() {
+    const root       = this.shadowRoot;
+    const searchInput = root.getElementById('entitySearch');
+    const listEl      = root.getElementById('entityList');
+
+    // Show dropdown on focus
+    searchInput.addEventListener('focus', () => {
+      this._filterList('');
+      listEl.classList.remove('hidden');
+    });
+
+    // Filter as user types
+    searchInput.addEventListener('input', () => {
+      this._filterList(searchInput.value);
+      listEl.classList.remove('hidden');
+    });
+
+    // Pick an entity from the list
+    listEl.addEventListener('mousedown', (e) => {
+      const opt = e.target.closest('.entity-option');
+      if (!opt) return;
+      e.preventDefault(); // prevent blur before click
+      const id = opt.dataset.id;
+      searchInput.value = id;
+      listEl.classList.add('hidden');
+      listEl.querySelectorAll('.entity-option').forEach(o => o.classList.toggle('selected', o.dataset.id === id));
+      this._updateConfig('entity', id);
+    });
+
+    // Hide dropdown on blur
+    searchInput.addEventListener('blur', () => {
+      setTimeout(() => listEl.classList.add('hidden'), 150);
+    });
+
+    root.getElementById('show_seconds').onchange    = (e) => this._updateConfig('show_seconds', e.target.checked);
+    root.getElementById('use_glassmorphism').onchange = (e) => this._updateConfig('use_glassmorphism', e.target.checked);
+  }
+
+  _filterList(term) {
+    const lower = term.toLowerCase();
+    this.shadowRoot.querySelectorAll('.entity-option').forEach(opt => {
+      const text = opt.textContent.toLowerCase();
+      opt.style.display = text.includes(lower) ? '' : 'none';
+    });
+  }
+
   _buildColourPickers() {
     const COLOUR_FIELDS = [
-      {
-        key: 'accent_color', label: 'Accent / Ring',
-        desc: 'Progress ring and active state colour',
-        default: '#FF9F0A', maxlen: 7,
-      },
-      {
-        key: 'text_color', label: 'Text Colour',
-        desc: 'Time digits and name label colour',
-        default: '#ffffff', maxlen: 7,
-      },
-      {
-        key: 'card_bg', label: 'Card Background',
-        desc: '#000000 = transparent · 8-digit hex for opacity e.g. #1c1c1ecc',
-        default: '#1c1c1e', maxlen: 9,
-      },
+      { key: 'accent_color', label: 'Accent / Ring',    desc: 'Progress ring and active state colour',              default: '#FF9F0A', maxlen: 7 },
+      { key: 'text_color',   label: 'Text Colour',      desc: 'Time digits and name label colour',                  default: '#ffffff', maxlen: 7 },
+      { key: 'card_bg',      label: 'Card Background',  desc: '#000000 = transparent · 8-digit hex for opacity',    default: '#1c1c1e', maxlen: 9 },
     ];
 
     const grid = this.shadowRoot.getElementById('colour-grid');
@@ -601,19 +741,12 @@ class CougarCountdownCardEditor extends HTMLElement {
     }
   }
 
-  _setupListeners() {
-    const root = this.shadowRoot;
-    root.getElementById('entity').onchange          = (e) => this._updateConfig('entity', e.target.value);
-    root.getElementById('show_seconds').onchange    = (e) => this._updateConfig('show_seconds', e.target.checked);
-    root.getElementById('use_glassmorphism').onchange = (e) => this._updateConfig('use_glassmorphism', e.target.checked);
-  }
-
   _updateUI() {
     const root = this.shadowRoot;
     if (!root || !this._config) return;
 
-    const entitySel = root.getElementById('entity');
-    if (entitySel && this._config.entity) entitySel.value = this._config.entity;
+    const searchInput = root.getElementById('entitySearch');
+    if (searchInput && this._config.entity) searchInput.value = this._config.entity;
 
     const showSecs = root.getElementById('show_seconds');
     if (showSecs) showSecs.checked = this._config.show_seconds !== false;
