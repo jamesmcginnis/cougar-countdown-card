@@ -254,6 +254,7 @@ class CougarCountdownCard extends HTMLElement {
           display: flex;
           flex-direction: column;
           align-items: center;
+          cursor: pointer;
           gap: ${showName ? '10px' : '0'};
         }
 
@@ -372,6 +373,8 @@ class CougarCountdownCard extends HTMLElement {
         </div>
       </ha-card>
     `;
+    // Tap to show info popup
+    this.shadowRoot.querySelector('.card').addEventListener('click', () => this._showPopup());
   }
 
   // ── Update ───────────────────────────────────────────────────────────────────
@@ -412,6 +415,203 @@ class CougarCountdownCard extends HTMLElement {
       ringEl.style.stroke  = ringColor;
       ringEl.style.filter  = `drop-shadow(0 0 6px ${ringColor}88)`;
     }
+  }
+
+  // ── Popup ───────────────────────────────────────────────────────────────────
+
+  _fmtClock(date) {
+    if (!(date instanceof Date) || isNaN(date)) return '—';
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  _fmtDate(date) {
+    if (!(date instanceof Date) || isNaN(date)) return '—';
+    const today    = new Date();
+    const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+    if (date.toDateString() === today.toDateString())    return 'Today';
+    if (date.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
+    return date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  _fmtDuration(seconds) {
+    const s = Math.round(seconds);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0 && sec === 0) return `${m} minute${m !== 1 ? 's' : ''}`;
+    if (m > 0) return `${m}m ${sec}s`;
+    return `${sec} second${sec !== 1 ? 's' : ''}`;
+  }
+
+  _buildPopupRows() {
+    const cfg      = this._config;
+    const stateObj = this._hass?.states[cfg?.entity];
+    if (!stateObj) return [];
+
+    const attrs  = stateObj.attributes;
+    const info   = this._getRemaining();
+    if (!info) return [];
+
+    const acc    = cfg.accent_color || '#FF9F0A';
+    const rows   = [];
+
+    // ── Status ──────────────────────────────────────────────────────────────
+    const statusLabel = { active: 'Running', paused: 'Paused', idle: 'Idle' }[info.state] || info.state;
+    const statusColor = info.state === 'active' ? acc : info.state === 'paused' ? '#FF9F0A' : 'rgba(255,255,255,0.35)';
+    rows.push({ label: 'Status', value: statusLabel, color: statusColor });
+
+    // ── Derive start time and fire time ──────────────────────────────────────
+    let startedAt = null;
+    let finishesAt = null;
+
+    // Alexa sorted_active path
+    if (attrs.sorted_active != null) {
+      try {
+        const raw   = typeof attrs.sorted_active === 'string' ? JSON.parse(attrs.sorted_active) : attrs.sorted_active;
+        const entry = Array.isArray(raw) && raw.length > 0 ? (Array.isArray(raw[0]) ? raw[0][1] : raw[0]) : null;
+        if (entry) {
+          const lastUpdated = new Date(stateObj.last_updated).getTime();
+          const elapsed     = Date.now() - lastUpdated;
+          const remMs       = Math.max(0, entry.remainingTime - elapsed);
+          finishesAt = new Date(Date.now() + remMs);
+          if (entry.createdDate) startedAt = new Date(entry.createdDate);
+
+          // Timer label from Alexa (if user named it)
+          if (entry.timerLabel) rows.push({ label: 'Label', value: entry.timerLabel });
+
+          // Multiple active timers note
+          if (Array.isArray(raw) && raw.length > 1) {
+            rows.push({ label: 'Active Timers', value: String(raw.length), color: acc });
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Native timer path
+    if (!finishesAt && attrs.finishes_at) {
+      finishesAt = new Date(attrs.finishes_at);
+    }
+    if (!startedAt && finishesAt && info.total > 0) {
+      startedAt = new Date(finishesAt.getTime() - info.total * 1000);
+    }
+    // Paused: derive finishes_at from remaining
+    if (!finishesAt && info.seconds > 0) {
+      finishesAt = new Date(Date.now() + info.seconds * 1000);
+    }
+
+    // ── Time rows ────────────────────────────────────────────────────────────
+    if (startedAt) {
+      rows.push({ label: 'Started', value: `${this._fmtClock(startedAt)}` + (this._fmtDate(startedAt) !== 'Today' ? `  ·  ${this._fmtDate(startedAt)}` : '') });
+    }
+
+    if (finishesAt && info.state !== 'idle') {
+      rows.push({ label: 'Finishes', value: `${this._fmtClock(finishesAt)}` + (this._fmtDate(finishesAt) !== 'Today' ? `  ·  ${this._fmtDate(finishesAt)}` : ''), color: acc });
+    }
+
+    // ── Duration & remaining ─────────────────────────────────────────────────
+    if (info.total > 0) {
+      rows.push({ label: 'Duration', value: this._fmtDuration(info.total) });
+    }
+
+    if (info.state !== 'idle') {
+      rows.push({ label: 'Remaining', value: this._fmtDuration(info.seconds) });
+      const pct = info.total > 0 ? Math.round((info.seconds / info.total) * 100) : 0;
+      rows.push({ label: 'Progress', value: `${pct}% remaining`, color: this._ringColor(pct / 100, acc) });
+    }
+
+    return rows;
+  }
+
+  _showPopup() {
+    if (this._popupEl) this._closePopup();
+    const cfg      = this._config;
+    const stateObj = this._hass?.states[cfg?.entity];
+    if (!stateObj) return;
+
+    const acc    = cfg.accent_color  || '#FF9F0A';
+    const txt    = cfg.text_color    || '#ffffff';
+    const rawBg  = cfg.card_bg || '#1c1c1e';
+    const bgBase = rawBg === '#000000' ? '#1c1c1e' : rawBg.substring(0, 7);
+    const labelName = (cfg.custom_name || '').trim()
+      || stateObj.attributes?.friendly_name
+      || cfg.entity || 'Timer';
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:9999',
+      'display:flex', 'align-items:center', 'justify-content:center',
+      'background:rgba(0,0,0,0.55)',
+      'backdrop-filter:blur(10px)',
+      '-webkit-backdrop-filter:blur(10px)',
+      'animation:ccFadeIn 0.18s ease',
+    ].join(';');
+
+    const sheet = document.createElement('style');
+    sheet.textContent = `
+      @keyframes ccFadeIn  { from { opacity:0; transform:scale(0.94) } to { opacity:1; transform:scale(1) } }
+      @keyframes ccFadeOut { from { opacity:1; transform:scale(1) } to { opacity:0; transform:scale(0.94) } }
+    `;
+    overlay.appendChild(sheet);
+
+    const popup = document.createElement('div');
+    popup.style.cssText = [
+      `background:${bgBase}ee`,
+      'backdrop-filter:blur(28px) saturate(180%)',
+      '-webkit-backdrop-filter:blur(28px) saturate(180%)',
+      `border:1px solid rgba(255,255,255,0.14)`,
+      'border-radius:24px',
+      'padding:24px 24px 20px',
+      'min-width:280px',
+      'max-width:360px',
+      'width:calc(100vw - 48px)',
+      `font-family:-apple-system,"SF Pro Display",BlinkMacSystemFont,"Helvetica Neue",sans-serif`,
+      `color:${txt}`,
+      'box-shadow:0 24px 64px rgba(0,0,0,0.5)',
+      'box-sizing:border-box',
+    ].join(';');
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;';
+    header.innerHTML = `
+      <div style="font-size:17px;font-weight:600;letter-spacing:-0.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;padding-right:12px;">${labelName}</div>
+      <button id="ccClose" style="background:rgba(255,255,255,0.1);border:none;border-radius:50%;width:28px;height:28px;cursor:pointer;color:${txt};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;line-height:1;">✕</button>
+    `;
+    popup.appendChild(header);
+
+    // Rows container
+    const rowsEl = document.createElement('div');
+    rowsEl.id = 'ccRows';
+    rowsEl.style.cssText = 'display:flex;flex-direction:column;gap:0;';
+    popup.appendChild(rowsEl);
+
+    overlay.appendChild(popup);
+    document.body.appendChild(overlay);
+    this._popupEl = overlay;
+
+    const renderRows = () => {
+      const rows = this._buildPopupRows();
+      rowsEl.innerHTML = rows.map((r, i) => `
+        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:11px 0;${i < rows.length - 1 ? 'border-bottom:1px solid rgba(255,255,255,0.07)' : ''}">
+          <span style="font-size:13px;opacity:0.45;font-weight:500;letter-spacing:0.01em;">${r.label}</span>
+          <span style="font-size:14px;font-weight:500;text-align:right;${r.color ? `color:${r.color}` : ''}">${r.value}</span>
+        </div>
+      `).join('');
+    };
+
+    renderRows();
+    this._popupInterval = setInterval(renderRows, 1000);
+
+    overlay.querySelector('#ccClose').addEventListener('click', (e) => { e.stopPropagation(); this._closePopup(); });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) this._closePopup(); });
+    document.addEventListener('keydown', this._popupKeyHandler = (e) => { if (e.key === 'Escape') this._closePopup(); });
+  }
+
+  _closePopup() {
+    if (this._popupInterval) { clearInterval(this._popupInterval); this._popupInterval = null; }
+    if (this._popupKeyHandler) { document.removeEventListener('keydown', this._popupKeyHandler); this._popupKeyHandler = null; }
+    if (this._popupEl) { this._popupEl.remove(); this._popupEl = null; }
   }
 
   getCardSize() { return 4; }
