@@ -19,7 +19,6 @@ class CougarCountdownCard extends HTMLElement {
   static getStubConfig() {
     return {
       entity: '',
-      show_seconds: true,
       show_name: true,
       custom_name: '',
       display_style: 'ring',
@@ -32,7 +31,6 @@ class CougarCountdownCard extends HTMLElement {
 
   setConfig(config) {
     this._config = {
-      show_seconds: true,
       show_name: true,
       custom_name: '',
       display_style: 'ring',
@@ -143,7 +141,7 @@ class CougarCountdownCard extends HTMLElement {
     return 0;
   }
 
-  _formatTime(totalSeconds, showSeconds) {
+  _formatTime(totalSeconds) {
     const s     = Math.max(0, Math.ceil(totalSeconds));
     const hours = Math.floor(s / 3600);
     const mins  = Math.floor((s % 3600) / 60);
@@ -151,8 +149,7 @@ class CougarCountdownCard extends HTMLElement {
     const hh = String(hours).padStart(2, '0');
     const mm = String(mins).padStart(2, '0');
     const ss = String(secs).padStart(2, '0');
-    if (hours > 0) return showSeconds ? `${hh}:${mm}:${ss}` : `${hh}:${mm}`;
-    return showSeconds ? `${mm}:${ss}` : mm;
+    return hours > 0 ? `${hh}:${mm}:${ss}` : `${mm}:${ss}`;
   }
 
   _bgStyle() {
@@ -170,17 +167,14 @@ class CougarCountdownCard extends HTMLElement {
   // ── Render ───────────────────────────────────────────────────────────────────
 
   _render() {
-    const cfg      = this._config;
-    const acc      = cfg.accent_color  || '#FF9F0A';
-    const txt      = cfg.text_color    || '#ffffff';
-    const bg       = this._bgStyle();
-    const isRing   = cfg.display_style !== 'digits';
+    const cfg    = this._config;
+    const acc    = cfg.accent_color || '#FF9F0A';
+    const txt    = cfg.text_color   || '#ffffff';
+    const bg     = this._bgStyle();
+    const isRing = cfg.display_style !== 'digits';
     const showName = cfg.show_name !== false;
     const R = 100;
     const C = (2 * Math.PI * R).toFixed(2);
-
-    // Padding: tighter when name is hidden or digits-only
-    const vPad = showName ? '20px' : '16px';
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -193,10 +187,9 @@ class CougarCountdownCard extends HTMLElement {
           -webkit-backdrop-filter: ${bg.backdrop};
           border: ${bg.border};
           border-radius: 28px;
-          padding: ${vPad} 20px;
+          padding: ${showName ? '18px 20px 20px' : '20px'};
           font-family: -apple-system, "SF Pro Display", BlinkMacSystemFont, "Helvetica Neue", sans-serif;
           color: ${txt};
-          position: relative;
           overflow: hidden;
           user-select: none;
           -webkit-user-select: none;
@@ -204,10 +197,9 @@ class CougarCountdownCard extends HTMLElement {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: ${showName ? '14px' : '0'};
+          gap: ${showName ? '12px' : '0'};
         }
 
-        /* ── Name ── */
         .timer-name {
           text-align: center;
           font-size: 15px;
@@ -223,7 +215,7 @@ class CougarCountdownCard extends HTMLElement {
           box-sizing: border-box;
         }
 
-        /* ── Ring layout ── */
+        /* ── Ring ── */
         .ring-container {
           position: relative;
           width: 220px;
@@ -259,39 +251,24 @@ class CougarCountdownCard extends HTMLElement {
           filter: drop-shadow(0 0 6px ${acc}88);
         }
 
-        /* ── Time display (shared) ── */
-        .time-display {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          text-align: center;
-          gap: 6px;
-        }
-
-        /* Inside the ring */
-        .ring-container .time-display {
-          position: relative;
-          z-index: 1;
-        }
-
+        /* ── Digits ── */
         .time-digits {
           font-variant-numeric: tabular-nums;
           color: ${txt};
           line-height: 1;
           white-space: nowrap;
           transition: opacity 0.4s ease;
+          position: relative;
+          z-index: 1;
         }
 
-        /* Ring mode: thin and large */
         .ring-container .time-digits {
           font-size: 58px;
           font-weight: 200;
           letter-spacing: -3px;
         }
 
-        /* Digits-only mode: bolder and bigger */
-        .digits-only .time-digits {
+        .digits-only {
           font-size: 72px;
           font-weight: 100;
           letter-spacing: -4px;
@@ -306,45 +283,24 @@ class CougarCountdownCard extends HTMLElement {
           0%, 100% { opacity: 0.45; }
           50%       { opacity: 0.75; }
         }
-
-        /* ── State pill ── */
-        .state-pill {
-          font-size: 10px;
-          font-weight: 700;
-          letter-spacing: 0.1em;
-          text-transform: uppercase;
-          padding: 4px 12px;
-          border-radius: 20px;
-          transition: background 0.3s, color 0.3s;
-        }
-        .state-pill.active { background: ${acc}28; color: ${acc}; }
-        .state-pill.paused { background: rgba(255,255,255,0.10); color: rgba(255,255,255,0.4); }
-        .state-pill.idle   { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.3); }
       </style>
 
       <ha-card>
         <div class="card">
           ${showName ? `<div class="timer-name" id="timerName"></div>` : ''}
-
           ${isRing ? `
-          <div class="ring-container">
-            <svg class="ring-svg" viewBox="0 0 220 220">
-              <circle class="ring-bg"       cx="110" cy="110" r="${R}"/>
-              <circle class="ring-progress" cx="110" cy="110" r="${R}"
-                id="ringProgress"
-                stroke-dasharray="${C}"
-                stroke-dashoffset="0"/>
-            </svg>
-            <div class="time-display">
+            <div class="ring-container">
+              <svg class="ring-svg" viewBox="0 0 220 220">
+                <circle class="ring-bg"       cx="110" cy="110" r="${R}"/>
+                <circle class="ring-progress" cx="110" cy="110" r="${R}"
+                  id="ringProgress"
+                  stroke-dasharray="${C}"
+                  stroke-dashoffset="0"/>
+              </svg>
               <div class="time-digits" id="timeDigits">--:--</div>
-              <div class="state-pill idle" id="statePill">Idle</div>
             </div>
-          </div>
           ` : `
-          <div class="time-display digits-only">
-            <div class="time-digits" id="timeDigits">--:--</div>
-            <div class="state-pill idle" id="statePill">Idle</div>
-          </div>
+            <div class="time-digits digits-only" id="timeDigits">--:--</div>
           `}
         </div>
       </ha-card>
@@ -359,35 +315,24 @@ class CougarCountdownCard extends HTMLElement {
     const root   = this.shadowRoot;
     const nameEl = root.getElementById('timerName');
     const timeEl = root.getElementById('timeDigits');
-    const pillEl = root.getElementById('statePill');
     const ringEl = root.getElementById('ringProgress');
     if (!timeEl) return;
 
-    const stateObj = cfg?.entity ? this._hass.states[cfg.entity] : null;
-
-    // Resolve display name
+    const stateObj  = cfg?.entity ? this._hass.states[cfg.entity] : null;
     const haName    = stateObj?.attributes?.friendly_name || cfg.entity || '';
     const labelName = (cfg.custom_name || '').trim() || haName;
     if (nameEl) nameEl.textContent = labelName;
 
     if (!stateObj) {
-      if (timeEl) timeEl.textContent = '--:--';
-      if (pillEl) { pillEl.className = 'state-pill idle'; pillEl.textContent = 'Idle'; }
+      timeEl.textContent = '--:--';
       return;
     }
 
     const info = this._getRemaining();
     if (!info) return;
 
-    if (timeEl) {
-      timeEl.textContent = this._formatTime(info.seconds, cfg.show_seconds !== false);
-      timeEl.classList.toggle('is-paused', info.state === 'paused');
-    }
-
-    if (pillEl) {
-      pillEl.className   = `state-pill ${info.state}`;
-      pillEl.textContent = { active: 'Running', paused: 'Paused', idle: 'Idle' }[info.state] || info.state;
-    }
+    timeEl.textContent = this._formatTime(info.seconds);
+    timeEl.classList.toggle('is-paused', info.state === 'paused');
 
     if (ringEl) {
       const C   = 2 * Math.PI * 100;
@@ -434,8 +379,8 @@ class CougarCountdownCardEditor extends HTMLElement {
     if (!this._hass || !this._config) return;
     this._initialized = true;
 
-    const cfg    = this._config;
-    const selEnt = cfg.entity || '';
+    const cfg         = this._config;
+    const selEnt      = cfg.entity || '';
     const allEntities = Object.keys(this._hass.states).sort();
 
     this.shadowRoot.innerHTML = `
@@ -459,7 +404,6 @@ class CougarCountdownCardEditor extends HTMLElement {
         /* ── Entity picker ── */
         .entity-picker { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
         .hint { font-size: 11px; color: #888; line-height: 1.4; }
-
         input[type="text"] {
           width: 100%; box-sizing: border-box;
           background: var(--card-background-color);
@@ -473,8 +417,7 @@ class CougarCountdownCardEditor extends HTMLElement {
           max-height: 220px; overflow-y: auto;
           -webkit-overflow-scrolling: touch;
           border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 8px;
-          background: var(--card-background-color);
+          border-radius: 8px; background: var(--card-background-color);
         }
         .entity-list.hidden { display: none; }
         .entity-option {
@@ -513,7 +456,7 @@ class CougarCountdownCardEditor extends HTMLElement {
         .toggle-switch input:checked + .toggle-track { background: #34C759; }
         .toggle-switch input:checked + .toggle-track::after { transform: translateX(20px); }
 
-        /* ── Text input row ── */
+        /* ── Custom name input row ── */
         .input-row { padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
         .input-row label { font-size: 14px; font-weight: 500; }
 
@@ -537,12 +480,9 @@ class CougarCountdownCardEditor extends HTMLElement {
         .colour-card {
           border: 1px solid var(--divider-color, rgba(0,0,0,0.12));
           border-radius: 10px; overflow: hidden; cursor: pointer;
-          transition: box-shadow 0.15s, border-color 0.15s; position: relative;
+          transition: box-shadow 0.15s, border-color 0.15s;
         }
-        .colour-card:hover {
-          box-shadow: 0 2px 10px rgba(0,0,0,0.12);
-          border-color: var(--primary-color, #007AFF);
-        }
+        .colour-card:hover { box-shadow: 0 2px 10px rgba(0,0,0,0.12); border-color: var(--primary-color, #007AFF); }
         .colour-swatch { height: 44px; width: 100%; display: block; position: relative; }
         .colour-swatch input[type="color"] {
           position: absolute; inset: 0; width: 100%; height: 100%;
@@ -606,7 +546,6 @@ class CougarCountdownCardEditor extends HTMLElement {
           <div class="section-title">Display</div>
           <div class="card-block">
 
-            <!-- Display style segmented -->
             <div class="segmented-row" style="border-bottom:1px solid rgba(255,255,255,0.06);">
               <label>Style</label>
               <div class="segmented">
@@ -618,16 +557,6 @@ class CougarCountdownCardEditor extends HTMLElement {
             </div>
 
             <div class="toggle-list">
-              <div class="toggle-item">
-                <div>
-                  <div class="toggle-label">Show Seconds</div>
-                  <div class="toggle-desc">Display seconds alongside minutes</div>
-                </div>
-                <label class="toggle-switch">
-                  <input type="checkbox" id="show_seconds" ${cfg.show_seconds !== false ? 'checked' : ''}>
-                  <span class="toggle-track"></span>
-                </label>
-              </div>
               <div class="toggle-item">
                 <div>
                   <div class="toggle-label">Show Timer Name</div>
@@ -650,7 +579,6 @@ class CougarCountdownCardEditor extends HTMLElement {
               </div>
             </div>
 
-            <!-- Custom name input -->
             <div class="input-row" id="customNameRow" style="border-top:1px solid rgba(255,255,255,0.06);${cfg.show_name === false ? 'display:none' : ''}">
               <label for="custom_name">Custom Name</label>
               <div class="hint">Leave blank to use the entity's friendly name</div>
@@ -674,9 +602,7 @@ class CougarCountdownCardEditor extends HTMLElement {
       </div>
     `;
 
-    // Set segmented radio
-    const dsVal = cfg.display_style || 'ring';
-    const dsEl  = this.shadowRoot.getElementById('ds_' + dsVal);
+    const dsEl = this.shadowRoot.getElementById('ds_' + (cfg.display_style || 'ring'));
     if (dsEl) dsEl.checked = true;
 
     this._buildColourPickers();
@@ -688,14 +614,8 @@ class CougarCountdownCardEditor extends HTMLElement {
     const searchInput = root.getElementById('entitySearch');
     const listEl      = root.getElementById('entityList');
 
-    searchInput.addEventListener('focus', () => {
-      this._filterList('');
-      listEl.classList.remove('hidden');
-    });
-    searchInput.addEventListener('input', () => {
-      this._filterList(searchInput.value);
-      listEl.classList.remove('hidden');
-    });
+    searchInput.addEventListener('focus', () => { this._filterList(''); listEl.classList.remove('hidden'); });
+    searchInput.addEventListener('input', () => { this._filterList(searchInput.value); listEl.classList.remove('hidden'); });
     listEl.addEventListener('mousedown', (e) => {
       const opt = e.target.closest('.entity-option');
       if (!opt) return;
@@ -706,18 +626,12 @@ class CougarCountdownCardEditor extends HTMLElement {
       listEl.querySelectorAll('.entity-option').forEach(o => o.classList.toggle('selected', o.dataset.id === id));
       this._updateConfig('entity', id);
     });
-    searchInput.addEventListener('blur', () => {
-      setTimeout(() => listEl.classList.add('hidden'), 150);
-    });
+    searchInput.addEventListener('blur', () => { setTimeout(() => listEl.classList.add('hidden'), 150); });
 
-    // Display style
     ['ring', 'digits'].forEach(v => {
       const el = root.getElementById('ds_' + v);
       if (el) el.onchange = () => this._updateConfig('display_style', v);
     });
-
-    // Toggles
-    root.getElementById('show_seconds').onchange = (e) => this._updateConfig('show_seconds', e.target.checked);
 
     root.getElementById('show_name').onchange = (e) => {
       this._updateConfig('show_name', e.target.checked);
@@ -727,7 +641,6 @@ class CougarCountdownCardEditor extends HTMLElement {
 
     root.getElementById('use_glassmorphism').onchange = (e) => this._updateConfig('use_glassmorphism', e.target.checked);
 
-    // Custom name — debounced on input
     const customNameInput = root.getElementById('custom_name');
     let nameDebounce;
     customNameInput.addEventListener('input', () => {
@@ -814,9 +727,6 @@ class CougarCountdownCardEditor extends HTMLElement {
 
     const dsEl = root.getElementById('ds_' + (this._config.display_style || 'ring'));
     if (dsEl) dsEl.checked = true;
-
-    const showSecs = root.getElementById('show_seconds');
-    if (showSecs) showSecs.checked = this._config.show_seconds !== false;
 
     const showName = root.getElementById('show_name');
     if (showName) showName.checked = this._config.show_name !== false;
