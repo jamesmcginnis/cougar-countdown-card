@@ -187,7 +187,7 @@ class CougarCountdownCard extends HTMLElement {
           -webkit-backdrop-filter: ${bg.backdrop};
           border: ${bg.border};
           border-radius: 28px;
-          padding: ${showName ? '18px 20px 20px' : '20px'};
+          padding: ${isRing ? '14px' : (showName ? '18px 20px 20px' : '20px')};
           font-family: -apple-system, "SF Pro Display", BlinkMacSystemFont, "Helvetica Neue", sans-serif;
           color: ${txt};
           overflow: hidden;
@@ -197,7 +197,8 @@ class CougarCountdownCard extends HTMLElement {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: ${showName ? '12px' : '0'};
+          gap: ${showName ? '10px' : '0'};
+          ${isRing ? 'aspect-ratio: 1 / 1;' : ''}
         }
 
         .timer-name {
@@ -213,17 +214,21 @@ class CougarCountdownCard extends HTMLElement {
           width: 100%;
           padding: 0 4px;
           box-sizing: border-box;
+          flex-shrink: 0;
         }
 
         /* ── Ring ── */
         .ring-container {
           position: relative;
-          width: 220px;
-          height: 220px;
+          /* fills available width; aspect-ratio makes it square */
+          width: 100%;
+          aspect-ratio: 1 / 1;
+          min-width: 0;
           display: flex;
           align-items: center;
           justify-content: center;
-          flex-shrink: 0;
+          /* container query so digits scale with card width */
+          container-type: inline-size;
         }
 
         .ring-svg {
@@ -262,10 +267,11 @@ class CougarCountdownCard extends HTMLElement {
           z-index: 1;
         }
 
+        /* Scale with ring-container width via container query */
         .ring-container .time-digits {
-          font-size: 58px;
+          font-size: clamp(18px, 26cqw, 58px);
           font-weight: 200;
-          letter-spacing: -3px;
+          letter-spacing: -0.05em;
         }
 
         .digits-only {
