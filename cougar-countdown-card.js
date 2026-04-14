@@ -26,6 +26,7 @@ class CougarCountdownCard extends HTMLElement {
       accent_color: '#FF9F0A',
       text_color: '#ffffff',
       card_bg: '#1c1c1e',
+      use_glassmorphism: true,
     };
   }
 
@@ -38,6 +39,7 @@ class CougarCountdownCard extends HTMLElement {
       accent_color: '#FF9F0A',
       text_color: '#ffffff',
       card_bg: '#1c1c1e',
+      use_glassmorphism: true,
       ...config,
     };
     if (this._rendered) {
@@ -211,9 +213,12 @@ class CougarCountdownCard extends HTMLElement {
     const cfg = this._config;
     const raw = cfg.card_bg || '#1c1c1e';
     if (raw === '#000000') return { bg: 'transparent', border: 'none', backdrop: 'none' };
-    const base      = raw.substring(0, 7);
-    const withAlpha = /^#[0-9a-fA-F]{8}$/.test(raw) ? raw : base + 'cc';
-    return { bg: withAlpha, border: '1px solid rgba(255,255,255,0.14)', backdrop: 'blur(24px) saturate(180%)' };
+    if (cfg.use_glassmorphism) {
+      const base      = raw.substring(0, 7);
+      const withAlpha = /^#[0-9a-fA-F]{8}$/.test(raw) ? raw : base + 'cc';
+      return { bg: withAlpha, border: '1px solid rgba(255,255,255,0.14)', backdrop: 'blur(24px) saturate(180%)' };
+    }
+    return { bg: raw, border: 'none', backdrop: 'none' };
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -845,7 +850,16 @@ class CougarCountdownCardEditor extends HTMLElement {
                   <span class="toggle-track"></span>
                 </label>
               </div>
-
+              <div class="toggle-item">
+                <div>
+                  <div class="toggle-label">Glassmorphic Background</div>
+                  <div class="toggle-desc">Frosted-glass blur effect behind the card</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="use_glassmorphism" ${cfg.use_glassmorphism !== false ? 'checked' : ''}>
+                  <span class="toggle-track"></span>
+                </label>
+              </div>
             </div>
 
             <div class="input-row" id="customNameRow" style="border-top:1px solid rgba(255,255,255,0.06);${cfg.show_name === false ? 'display:none' : ''}">
@@ -919,6 +933,7 @@ class CougarCountdownCardEditor extends HTMLElement {
       if (row) row.style.display = e.target.checked ? '' : 'none';
     };
 
+    root.getElementById('use_glassmorphism').onchange = (e) => this._updateConfig('use_glassmorphism', e.target.checked);
 
     const customNameInput = root.getElementById('custom_name');
     let nameDebounce;
@@ -1020,6 +1035,8 @@ class CougarCountdownCardEditor extends HTMLElement {
     const customNameInput = root.getElementById('custom_name');
     if (customNameInput) customNameInput.value = this._config.custom_name || '';
 
+    const useGlass = root.getElementById('use_glassmorphism');
+    if (useGlass) useGlass.checked = this._config.use_glassmorphism !== false;
 
     root.querySelectorAll('.colour-card').forEach(card => {
       const key       = card.dataset.key;
