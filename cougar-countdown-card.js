@@ -76,6 +76,31 @@ class CougarCountdownCard extends HTMLElement {
     const state = stateObj.state;
     const attrs = stateObj.attributes;
 
+    // ── Alexa Media Player: derive accurate remaining + total from sorted_active
+    if (attrs.sorted_active != null) {
+      try {
+        const raw = typeof attrs.sorted_active === 'string'
+          ? JSON.parse(attrs.sorted_active)
+          : attrs.sorted_active;
+        // sorted_active is an array of [key, timerData] pairs or plain objects
+        const entry = Array.isArray(raw) && raw.length > 0
+          ? (Array.isArray(raw[0]) ? raw[0][1] : raw[0])
+          : null;
+        if (entry && entry.remainingTime != null) {
+          // remainingTime is ms remaining at the moment HA last updated the sensor
+          const lastUpdated  = new Date(stateObj.last_updated).getTime();
+          const elapsed      = Date.now() - lastUpdated;           // ms since last poll
+          const remaining    = Math.max(0, entry.remainingTime - elapsed) / 1000;
+          // total = full original duration; derived from createdDate + remainingTime at poll
+          const total = entry.createdDate
+            ? ((lastUpdated + entry.remainingTime) - entry.createdDate) / 1000
+            : (this._attrDuration(attrs) || remaining);
+          const paused = entry.status === 'PAUSED' || entry.status === 'paused';
+          return { seconds: remaining, state: paused ? 'paused' : (remaining > 0 ? 'active' : 'idle'), total: Math.max(total, remaining) };
+        }
+      } catch (_) { /* fall through */ }
+    }
+
     if (['idle', 'active', 'paused'].includes(state)) {
       const total = this._parseDuration(attrs.duration || '0:00:00');
       if (state === 'idle')   return { seconds: total, state: 'idle', total };
@@ -141,6 +166,36 @@ class CougarCountdownCard extends HTMLElement {
     if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
     if (parts.length === 2) return parts[0] * 60  + parts[1];
     return 0;
+  }
+
+  // ── Colour helpers ───────────────────────────────────────────────────────────
+
+  /** Linearly interpolate between two 6-digit hex colours. t=0 → c1, t=1 → c2 */
+  _lerpColor(c1, c2, t) {
+    const h = s => parseInt(s, 16);
+    const r = Math.round(h(c1.slice(1,3)) + (h(c2.slice(1,3)) - h(c1.slice(1,3))) * t);
+    const g = Math.round(h(c1.slice(3,5)) + (h(c2.slice(3,5)) - h(c1.slice(3,5))) * t);
+    const b = Math.round(h(c1.slice(5,7)) + (h(c2.slice(5,7)) - h(c1.slice(5,7))) * t);
+    return '#' + [r,g,b].map(v => Math.min(255, Math.max(0, v)).toString(16).padStart(2,'0')).join('');
+  }
+
+  /**
+   * Returns the ring colour for the current progress fraction (0–1).
+   *   pct > 0.5  → accent colour unchanged
+   *   0.25–0.5   → accent fades to amber (#FF9F0A)
+   *   0–0.25     → amber fades to red   (#FF3B30)
+   */
+  _ringColor(pct, accent) {
+    const AMBER = '#FF9F0A';
+    const RED   = '#FF3B30';
+    const safeAccent = /^#[0-9a-fA-F]{6}$/.test(accent) ? accent : '#FF9F0A';
+    if (pct >= 0.5) return safeAccent;
+    if (pct >= 0.25) {
+      const t = 1 - ((pct - 0.25) / 0.25);   // 0 at pct=0.5, 1 at pct=0.25
+      return this._lerpColor(safeAccent, AMBER, t);
+    }
+    const t = 1 - (pct / 0.25);               // 0 at pct=0.25, 1 at pct=0
+    return this._lerpColor(AMBER, RED, t);
   }
 
   _formatTime(totalSeconds) {
@@ -253,7 +308,8 @@ class CougarCountdownCard extends HTMLElement {
           stroke-linecap: round;
           transform-origin: 50% 50%;
           transform: rotate(-90deg);
-          transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+          transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1),
+                      stroke 1s ease;
           filter: drop-shadow(0 0 6px ${acc}88);
         }
 
@@ -351,6 +407,10 @@ class CougarCountdownCard extends HTMLElement {
         ? Math.min(1, Math.max(0, info.seconds / info.total))
         : (info.state === 'idle' ? 1 : 0);
       ringEl.style.strokeDashoffset = (C * (1 - pct)).toFixed(3);
+      // Live colour: accent → amber → red as time runs out
+      const ringColor = this._ringColor(pct, cfg.accent_color || '#FF9F0A');
+      ringEl.style.stroke  = ringColor;
+      ringEl.style.filter  = `drop-shadow(0 0 6px ${ringColor}88)`;
     }
   }
 
