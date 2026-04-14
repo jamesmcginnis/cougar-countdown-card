@@ -198,7 +198,6 @@ class CougarCountdownCard extends HTMLElement {
           flex-direction: column;
           align-items: center;
           gap: ${showName ? '10px' : '0'};
-          ${isRing ? 'aspect-ratio: 1 / 1;' : ''}
         }
 
         .timer-name {
