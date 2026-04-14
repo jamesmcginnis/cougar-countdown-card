@@ -595,7 +595,7 @@ class CougarCountdownCard extends HTMLElement {
       rowsEl.innerHTML = rows.map((r, i) => `
         <div style="display:flex;justify-content:space-between;align-items:baseline;padding:11px 0;${i < rows.length - 1 ? 'border-bottom:1px solid rgba(255,255,255,0.07)' : ''}">
           <span style="font-size:13px;opacity:0.45;font-weight:500;letter-spacing:0.01em;">${r.label}</span>
-          <span style="font-size:14px;font-weight:500;text-align:right;${r.color ? `color:${r.color}` : ''}">${r.value}</span>
+          <span style="font-size:14px;font-weight:500;text-align:right;color:#ffffff;">${r.value}</span>
         </div>
       `).join('');
     };
