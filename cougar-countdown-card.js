@@ -22,6 +22,7 @@ class CougarCountdownCard extends HTMLElement {
       show_name: true,
       custom_name: '',
       display_style: 'ring',
+      digits_align: 'center',
       accent_color: '#FF9F0A',
       text_color: '#ffffff',
       card_bg: '#1c1c1e',
@@ -34,6 +35,7 @@ class CougarCountdownCard extends HTMLElement {
       show_name: true,
       custom_name: '',
       display_style: 'ring',
+      digits_align: 'center',
       accent_color: '#FF9F0A',
       text_color: '#ffffff',
       card_bg: '#1c1c1e',
@@ -274,9 +276,13 @@ class CougarCountdownCard extends HTMLElement {
         }
 
         .digits-only {
-          font-size: 72px;
+          font-size: clamp(36px, 18vw, 72px);
           font-weight: 100;
-          letter-spacing: -4px;
+          letter-spacing: -0.05em;
+          width: 100%;
+          text-align: ${cfg.digits_align || 'center'};
+          padding: 0 4px;
+          box-sizing: border-box;
         }
 
         .time-digits.is-paused {
@@ -561,6 +567,18 @@ class CougarCountdownCardEditor extends HTMLElement {
               </div>
             </div>
 
+            <div class="segmented-row" id="alignRow" style="border-bottom:1px solid rgba(255,255,255,0.06);${(cfg.display_style || 'ring') !== 'digits' ? 'display:none' : ''}">
+              <label>Alignment</label>
+              <div class="segmented">
+                <input type="radio" name="digits_align" id="da_left"   value="left">
+                <label for="da_left">Left</label>
+                <input type="radio" name="digits_align" id="da_center" value="center">
+                <label for="da_center">Centre</label>
+                <input type="radio" name="digits_align" id="da_right"  value="right">
+                <label for="da_right">Right</label>
+              </div>
+            </div>
+
             <div class="toggle-list">
               <div class="toggle-item">
                 <div>
@@ -609,6 +627,8 @@ class CougarCountdownCardEditor extends HTMLElement {
 
     const dsEl = this.shadowRoot.getElementById('ds_' + (cfg.display_style || 'ring'));
     if (dsEl) dsEl.checked = true;
+    const daEl = this.shadowRoot.getElementById('da_' + (cfg.digits_align || 'center'));
+    if (daEl) daEl.checked = true;
 
     this._buildColourPickers();
     this._setupListeners();
@@ -635,7 +655,16 @@ class CougarCountdownCardEditor extends HTMLElement {
 
     ['ring', 'digits'].forEach(v => {
       const el = root.getElementById('ds_' + v);
-      if (el) el.onchange = () => this._updateConfig('display_style', v);
+      if (el) el.onchange = () => {
+        this._updateConfig('display_style', v);
+        const alignRow = root.getElementById('alignRow');
+        if (alignRow) alignRow.style.display = v === 'digits' ? '' : 'none';
+      };
+    });
+
+    ['left', 'center', 'right'].forEach(v => {
+      const el = root.getElementById('da_' + v);
+      if (el) el.onchange = () => this._updateConfig('digits_align', v);
     });
 
     root.getElementById('show_name').onchange = (e) => {
@@ -732,6 +761,10 @@ class CougarCountdownCardEditor extends HTMLElement {
 
     const dsEl = root.getElementById('ds_' + (this._config.display_style || 'ring'));
     if (dsEl) dsEl.checked = true;
+    const daEl = root.getElementById('da_' + (this._config.digits_align || 'center'));
+    if (daEl) daEl.checked = true;
+    const alignRow = root.getElementById('alignRow');
+    if (alignRow) alignRow.style.display = (this._config.display_style || 'ring') === 'digits' ? '' : 'none';
 
     const showName = root.getElementById('show_name');
     if (showName) showName.checked = this._config.show_name !== false;
