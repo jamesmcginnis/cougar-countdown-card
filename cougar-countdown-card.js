@@ -566,7 +566,7 @@ class CougarCountdownCard extends HTMLElement {
       'max-width:360px',
       'width:calc(100vw - 48px)',
       `font-family:-apple-system,"SF Pro Display",BlinkMacSystemFont,"Helvetica Neue",sans-serif`,
-      `color:${txt}`,
+      'color:#ffffff',
       'box-shadow:0 24px 64px rgba(0,0,0,0.5)',
       'box-sizing:border-box',
     ].join(';');
@@ -575,8 +575,8 @@ class CougarCountdownCard extends HTMLElement {
     const header = document.createElement('div');
     header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;';
     header.innerHTML = `
-      <div style="font-size:17px;font-weight:600;letter-spacing:-0.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;padding-right:12px;">${labelName}</div>
-      <button id="ccClose" style="background:rgba(255,255,255,0.1);border:none;border-radius:50%;width:28px;height:28px;cursor:pointer;color:${txt};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;line-height:1;">✕</button>
+      <div style="font-size:17px;font-weight:600;color:#ffffff;letter-spacing:-0.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;padding-right:12px;">${labelName}</div>
+      <button id="ccClose" style="background:rgba(255,255,255,0.1);border:none;border-radius:50%;width:28px;height:28px;cursor:pointer;color:#ffffff;color:${txt};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;line-height:1;">✕</button>
     `;
     popup.appendChild(header);
 
