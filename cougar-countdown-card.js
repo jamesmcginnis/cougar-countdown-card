@@ -20,6 +20,9 @@ class CougarCountdownCard extends HTMLElement {
     return {
       entity: '',
       show_seconds: true,
+      show_name: true,
+      custom_name: '',
+      display_style: 'ring',
       accent_color: '#FF9F0A',
       text_color: '#ffffff',
       card_bg: '#1c1c1e',
@@ -30,6 +33,9 @@ class CougarCountdownCard extends HTMLElement {
   setConfig(config) {
     this._config = {
       show_seconds: true,
+      show_name: true,
+      custom_name: '',
+      display_style: 'ring',
       accent_color: '#FF9F0A',
       text_color: '#ffffff',
       card_bg: '#1c1c1e',
@@ -64,97 +70,63 @@ class CougarCountdownCard extends HTMLElement {
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
-  /**
-   * Returns { seconds, state, total } for both native timer.* entities
-   * and sensor entities (e.g. sensor.kitchen_next_timer from Google Home /
-   * Alexa integrations).
-   *
-   * Native timer.*:  state = idle | active | paused
-   *                  attrs: duration, remaining, finishes_at
-   *
-   * Sensor timers:   state may be an ISO datetime (fire time),
-   *                  a numeric string (remaining seconds),
-   *                  or a formatted string like "0:05:00".
-   *                  attrs may carry: duration, remaining, status, fire_time, etc.
-   */
   _getRemaining() {
     const stateObj = this._hass?.states[this._config?.entity];
     if (!stateObj) return null;
-
     const state = stateObj.state;
     const attrs = stateObj.attributes;
 
-    // ── Native HA timer entity ───────────────────────────────────────────────
     if (['idle', 'active', 'paused'].includes(state)) {
       const total = this._parseDuration(attrs.duration || '0:00:00');
-      if (state === 'idle')   return { seconds: total, state: 'idle',   total };
+      if (state === 'idle')   return { seconds: total, state: 'idle', total };
       if (state === 'paused') return { seconds: this._parseDuration(attrs.remaining || '0:00:00'), state: 'paused', total };
-      // active
-      if (attrs.finishes_at) {
-        return { seconds: Math.max(0, (new Date(attrs.finishes_at) - Date.now()) / 1000), state: 'active', total };
-      }
+      if (attrs.finishes_at)  return { seconds: Math.max(0, (new Date(attrs.finishes_at) - Date.now()) / 1000), state: 'active', total };
       return { seconds: this._parseDuration(attrs.remaining || '0:00:00'), state: 'active', total };
     }
 
-    // ── Sensor-based timer (Google Home, Alexa, etc.) ────────────────────────
-
-    // Attempt 1 — state is an ISO datetime string (fire time)
-    // e.g. "2024-05-01T12:34:56+00:00"
     const asDate = new Date(state);
     if (!isNaN(asDate.getTime()) && state.includes('T')) {
       const remaining = Math.max(0, (asDate - Date.now()) / 1000);
-      const total     = this._attrDuration(attrs) || remaining;
-      const timerState = remaining <= 0 ? 'idle' : 'active';
-      return { seconds: remaining, state: timerState, total };
+      const total = this._attrDuration(attrs) || remaining;
+      return { seconds: remaining, state: remaining <= 0 ? 'idle' : 'active', total };
     }
 
-    // Attempt 2 — attrs.fire_time or attrs.finishes_at is a datetime
     const fireAttr = attrs.fire_time || attrs.finishes_at || attrs.end_time;
     if (fireAttr) {
       const fireDate = new Date(fireAttr);
       if (!isNaN(fireDate.getTime())) {
         const remaining = Math.max(0, (fireDate - Date.now()) / 1000);
-        const total     = this._attrDuration(attrs) || remaining;
-        const timerState = remaining <= 0 ? 'idle' : 'active';
-        return { seconds: remaining, state: timerState, total };
+        const total = this._attrDuration(attrs) || remaining;
+        return { seconds: remaining, state: remaining <= 0 ? 'idle' : 'active', total };
       }
     }
 
-    // Attempt 3 — attrs.remaining is a duration string or seconds value
     if (attrs.remaining != null) {
-      const rem   = typeof attrs.remaining === 'number'
-        ? attrs.remaining
-        : this._parseDuration(String(attrs.remaining));
+      const rem   = typeof attrs.remaining === 'number' ? attrs.remaining : this._parseDuration(String(attrs.remaining));
       const total = this._attrDuration(attrs) || rem;
       const paused = attrs.status === 'paused' || attrs.paused === true;
       return { seconds: rem, state: paused ? 'paused' : (rem > 0 ? 'active' : 'idle'), total };
     }
 
-    // Attempt 4 — state itself is a numeric string (remaining seconds)
     const asNum = parseFloat(state);
     if (!isNaN(asNum)) {
       const total = this._attrDuration(attrs) || asNum;
       return { seconds: Math.max(0, asNum), state: asNum > 0 ? 'active' : 'idle', total };
     }
 
-    // Attempt 5 — state is a duration string like "0:05:00" or "5:00"
     const asDur = this._parseDuration(state);
     if (asDur > 0) {
       const total = this._attrDuration(attrs) || asDur;
       return { seconds: asDur, state: 'active', total };
     }
 
-    // Unavailable / unknown
     return { seconds: 0, state: 'idle', total: 0 };
   }
 
-  /** Try common attribute keys that represent a total duration. */
   _attrDuration(attrs) {
     for (const key of ['duration', 'total_duration', 'original_duration', 'total']) {
       if (attrs[key] != null) {
-        const v = typeof attrs[key] === 'number'
-          ? attrs[key]
-          : this._parseDuration(String(attrs[key]));
+        const v = typeof attrs[key] === 'number' ? attrs[key] : this._parseDuration(String(attrs[key]));
         if (v > 0) return v;
       }
     }
@@ -163,10 +135,8 @@ class CougarCountdownCard extends HTMLElement {
 
   _parseDuration(str) {
     if (!str) return 0;
-    // Already a number
     const asNum = parseFloat(str);
     if (!isNaN(asNum) && !str.includes(':')) return asNum;
-    // H:MM:SS or M:SS
     const parts = str.split(':').map(Number);
     if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
     if (parts.length === 2) return parts[0] * 60  + parts[1];
@@ -200,12 +170,17 @@ class CougarCountdownCard extends HTMLElement {
   // ── Render ───────────────────────────────────────────────────────────────────
 
   _render() {
-    const cfg = this._config;
-    const acc = cfg.accent_color || '#FF9F0A';
-    const txt = cfg.text_color   || '#ffffff';
-    const bg  = this._bgStyle();
-    const R   = 100;
-    const C   = (2 * Math.PI * R).toFixed(2);
+    const cfg      = this._config;
+    const acc      = cfg.accent_color  || '#FF9F0A';
+    const txt      = cfg.text_color    || '#ffffff';
+    const bg       = this._bgStyle();
+    const isRing   = cfg.display_style !== 'digits';
+    const showName = cfg.show_name !== false;
+    const R = 100;
+    const C = (2 * Math.PI * R).toFixed(2);
+
+    // Padding: tighter when name is hidden or digits-only
+    const vPad = showName ? '20px' : '16px';
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -218,7 +193,7 @@ class CougarCountdownCard extends HTMLElement {
           -webkit-backdrop-filter: ${bg.backdrop};
           border: ${bg.border};
           border-radius: 28px;
-          padding: 28px 20px 30px;
+          padding: ${vPad} 20px;
           font-family: -apple-system, "SF Pro Display", BlinkMacSystemFont, "Helvetica Neue", sans-serif;
           color: ${txt};
           position: relative;
@@ -226,8 +201,13 @@ class CougarCountdownCard extends HTMLElement {
           user-select: none;
           -webkit-user-select: none;
           box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: ${showName ? '14px' : '0'};
         }
 
+        /* ── Name ── */
         .timer-name {
           text-align: center;
           font-size: 15px;
@@ -235,19 +215,15 @@ class CougarCountdownCard extends HTMLElement {
           color: ${txt};
           opacity: 0.55;
           letter-spacing: 0.01em;
-          margin-bottom: 22px;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
-          padding: 0 12px;
+          width: 100%;
+          padding: 0 4px;
+          box-sizing: border-box;
         }
 
-        .ring-wrap {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
+        /* ── Ring layout ── */
         .ring-container {
           position: relative;
           width: 220px;
@@ -283,26 +259,42 @@ class CougarCountdownCard extends HTMLElement {
           filter: drop-shadow(0 0 6px ${acc}88);
         }
 
+        /* ── Time display (shared) ── */
         .time-display {
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
           text-align: center;
-          z-index: 1;
           gap: 6px;
+        }
+
+        /* Inside the ring */
+        .ring-container .time-display {
           position: relative;
+          z-index: 1;
         }
 
         .time-digits {
+          font-variant-numeric: tabular-nums;
+          color: ${txt};
+          line-height: 1;
+          white-space: nowrap;
+          transition: opacity 0.4s ease;
+        }
+
+        /* Ring mode: thin and large */
+        .ring-container .time-digits {
           font-size: 58px;
           font-weight: 200;
           letter-spacing: -3px;
-          line-height: 1;
-          font-variant-numeric: tabular-nums;
-          color: ${txt};
-          transition: opacity 0.4s ease;
-          white-space: nowrap;
+        }
+
+        /* Digits-only mode: bolder and bigger */
+        .digits-only .time-digits {
+          font-size: 72px;
+          font-weight: 100;
+          letter-spacing: -4px;
         }
 
         .time-digits.is-paused {
@@ -315,6 +307,7 @@ class CougarCountdownCard extends HTMLElement {
           50%       { opacity: 0.75; }
         }
 
+        /* ── State pill ── */
         .state-pill {
           font-size: 10px;
           font-weight: 700;
@@ -331,22 +324,28 @@ class CougarCountdownCard extends HTMLElement {
 
       <ha-card>
         <div class="card">
-          <div class="timer-name" id="timerName">Timer</div>
-          <div class="ring-wrap">
-            <div class="ring-container">
-              <svg class="ring-svg" viewBox="0 0 220 220">
-                <circle class="ring-bg"       cx="110" cy="110" r="${R}"/>
-                <circle class="ring-progress" cx="110" cy="110" r="${R}"
-                  id="ringProgress"
-                  stroke-dasharray="${C}"
-                  stroke-dashoffset="0"/>
-              </svg>
-              <div class="time-display">
-                <div class="time-digits" id="timeDigits">--:--</div>
-                <div class="state-pill idle" id="statePill">Idle</div>
-              </div>
+          ${showName ? `<div class="timer-name" id="timerName"></div>` : ''}
+
+          ${isRing ? `
+          <div class="ring-container">
+            <svg class="ring-svg" viewBox="0 0 220 220">
+              <circle class="ring-bg"       cx="110" cy="110" r="${R}"/>
+              <circle class="ring-progress" cx="110" cy="110" r="${R}"
+                id="ringProgress"
+                stroke-dasharray="${C}"
+                stroke-dashoffset="0"/>
+            </svg>
+            <div class="time-display">
+              <div class="time-digits" id="timeDigits">--:--</div>
+              <div class="state-pill idle" id="statePill">Idle</div>
             </div>
           </div>
+          ` : `
+          <div class="time-display digits-only">
+            <div class="time-digits" id="timeDigits">--:--</div>
+            <div class="state-pill idle" id="statePill">Idle</div>
+          </div>
+          `}
         </div>
       </ha-card>
     `;
@@ -366,14 +365,16 @@ class CougarCountdownCard extends HTMLElement {
 
     const stateObj = cfg?.entity ? this._hass.states[cfg.entity] : null;
 
+    // Resolve display name
+    const haName    = stateObj?.attributes?.friendly_name || cfg.entity || '';
+    const labelName = (cfg.custom_name || '').trim() || haName;
+    if (nameEl) nameEl.textContent = labelName;
+
     if (!stateObj) {
-      if (nameEl) nameEl.textContent = cfg?.entity ? cfg.entity : 'No entity selected';
       if (timeEl) timeEl.textContent = '--:--';
       if (pillEl) { pillEl.className = 'state-pill idle'; pillEl.textContent = 'Idle'; }
       return;
     }
-
-    if (nameEl) nameEl.textContent = stateObj.attributes?.friendly_name || cfg.entity;
 
     const info = this._getRemaining();
     if (!info) return;
@@ -384,7 +385,7 @@ class CougarCountdownCard extends HTMLElement {
     }
 
     if (pillEl) {
-      pillEl.className = `state-pill ${info.state}`;
+      pillEl.className   = `state-pill ${info.state}`;
       pillEl.textContent = { active: 'Running', paused: 'Paused', idle: 'Idle' }[info.state] || info.state;
     }
 
@@ -435,8 +436,6 @@ class CougarCountdownCardEditor extends HTMLElement {
 
     const cfg    = this._config;
     const selEnt = cfg.entity || '';
-
-    // Show all entities — user may use timer.*, sensor.*, input_datetime.*, etc.
     const allEntities = Object.keys(this._hass.states).sort();
 
     this.shadowRoot.innerHTML = `
@@ -471,32 +470,26 @@ class CougarCountdownCardEditor extends HTMLElement {
         input[type="text"]:focus { outline: none; border-color: rgba(255,255,255,0.3); }
 
         .entity-list {
-          max-height: 220px;
-          overflow-y: auto;
+          max-height: 220px; overflow-y: auto;
           -webkit-overflow-scrolling: touch;
           border: 1px solid rgba(255,255,255,0.08);
           border-radius: 8px;
           background: var(--card-background-color);
         }
         .entity-list.hidden { display: none; }
-
         .entity-option {
-          padding: 10px 12px;
-          font-size: 13px;
-          cursor: pointer;
+          padding: 10px 12px; font-size: 13px; cursor: pointer;
           border-bottom: 1px solid rgba(255,255,255,0.05);
           display: flex; flex-direction: column; gap: 2px;
         }
         .entity-option:last-child { border-bottom: none; }
-        .entity-option:hover, .entity-option.selected {
-          background: rgba(255,255,255,0.07);
-        }
+        .entity-option:hover, .entity-option.selected { background: rgba(255,255,255,0.07); }
         .entity-option.selected { color: #FF9F0A; }
         .entity-option-id { font-size: 11px; opacity: 0.5; font-family: monospace; }
 
         /* ── Toggles ── */
-        .toggle-list  { display: flex; flex-direction: column; }
-        .toggle-item  {
+        .toggle-list { display: flex; flex-direction: column; }
+        .toggle-item {
           display: flex; align-items: center; justify-content: space-between;
           padding: 13px 16px; border-bottom: 1px solid rgba(255,255,255,0.06); min-height: 52px;
         }
@@ -519,6 +512,25 @@ class CougarCountdownCardEditor extends HTMLElement {
         }
         .toggle-switch input:checked + .toggle-track { background: #34C759; }
         .toggle-switch input:checked + .toggle-track::after { transform: translateX(20px); }
+
+        /* ── Text input row ── */
+        .input-row { padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+        .input-row label { font-size: 14px; font-weight: 500; }
+
+        /* ── Segmented control ── */
+        .segmented-row { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+        .segmented-row label { font-size: 14px; font-weight: 500; }
+        .segmented { display: flex; background: rgba(118,118,128,0.2); border-radius: 9px; padding: 2px; gap: 2px; }
+        .segmented input[type="radio"] { display: none; }
+        .segmented label {
+          flex: 1; text-align: center; padding: 8px 4px; font-size: 13px; font-weight: 500;
+          border-radius: 7px; cursor: pointer; color: var(--primary-text-color);
+          transition: all 0.2s ease; white-space: nowrap;
+        }
+        .segmented input[type="radio"]:checked + label {
+          background: #FF9F0A; color: #fff;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+        }
 
         /* ── Colour pickers ── */
         .colour-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -566,7 +578,7 @@ class CougarCountdownCardEditor extends HTMLElement {
 
       <div class="container">
 
-        <!-- Entity picker -->
+        <!-- Entity -->
         <div>
           <div class="section-title">Entity</div>
           <div class="card-block">
@@ -589,18 +601,40 @@ class CougarCountdownCardEditor extends HTMLElement {
           </div>
         </div>
 
-        <!-- Options -->
+        <!-- Display -->
         <div>
-          <div class="section-title">Options</div>
+          <div class="section-title">Display</div>
           <div class="card-block">
+
+            <!-- Display style segmented -->
+            <div class="segmented-row" style="border-bottom:1px solid rgba(255,255,255,0.06);">
+              <label>Style</label>
+              <div class="segmented">
+                <input type="radio" name="display_style" id="ds_ring"   value="ring">
+                <label for="ds_ring">Ring &amp; Time</label>
+                <input type="radio" name="display_style" id="ds_digits" value="digits">
+                <label for="ds_digits">Time Only</label>
+              </div>
+            </div>
+
             <div class="toggle-list">
               <div class="toggle-item">
                 <div>
                   <div class="toggle-label">Show Seconds</div>
-                  <div class="toggle-desc">Display seconds alongside minutes in the countdown</div>
+                  <div class="toggle-desc">Display seconds alongside minutes</div>
                 </div>
                 <label class="toggle-switch">
                   <input type="checkbox" id="show_seconds" ${cfg.show_seconds !== false ? 'checked' : ''}>
+                  <span class="toggle-track"></span>
+                </label>
+              </div>
+              <div class="toggle-item">
+                <div>
+                  <div class="toggle-label">Show Timer Name</div>
+                  <div class="toggle-desc">Display the name label above the countdown</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="show_name" ${cfg.show_name !== false ? 'checked' : ''}>
                   <span class="toggle-track"></span>
                 </label>
               </div>
@@ -615,6 +649,17 @@ class CougarCountdownCardEditor extends HTMLElement {
                 </label>
               </div>
             </div>
+
+            <!-- Custom name input -->
+            <div class="input-row" id="customNameRow" style="border-top:1px solid rgba(255,255,255,0.06);${cfg.show_name === false ? 'display:none' : ''}">
+              <label for="custom_name">Custom Name</label>
+              <div class="hint">Leave blank to use the entity's friendly name</div>
+              <input type="text" id="custom_name"
+                placeholder="e.g. Kitchen Timer"
+                value="${cfg.custom_name || ''}"
+                autocomplete="off" spellcheck="false">
+            </div>
+
           </div>
         </div>
 
@@ -629,61 +674,80 @@ class CougarCountdownCardEditor extends HTMLElement {
       </div>
     `;
 
+    // Set segmented radio
+    const dsVal = cfg.display_style || 'ring';
+    const dsEl  = this.shadowRoot.getElementById('ds_' + dsVal);
+    if (dsEl) dsEl.checked = true;
+
     this._buildColourPickers();
     this._setupListeners();
   }
 
   _setupListeners() {
-    const root       = this.shadowRoot;
+    const root        = this.shadowRoot;
     const searchInput = root.getElementById('entitySearch');
     const listEl      = root.getElementById('entityList');
 
-    // Show dropdown on focus
     searchInput.addEventListener('focus', () => {
       this._filterList('');
       listEl.classList.remove('hidden');
     });
-
-    // Filter as user types
     searchInput.addEventListener('input', () => {
       this._filterList(searchInput.value);
       listEl.classList.remove('hidden');
     });
-
-    // Pick an entity from the list
     listEl.addEventListener('mousedown', (e) => {
       const opt = e.target.closest('.entity-option');
       if (!opt) return;
-      e.preventDefault(); // prevent blur before click
+      e.preventDefault();
       const id = opt.dataset.id;
       searchInput.value = id;
       listEl.classList.add('hidden');
       listEl.querySelectorAll('.entity-option').forEach(o => o.classList.toggle('selected', o.dataset.id === id));
       this._updateConfig('entity', id);
     });
-
-    // Hide dropdown on blur
     searchInput.addEventListener('blur', () => {
       setTimeout(() => listEl.classList.add('hidden'), 150);
     });
 
-    root.getElementById('show_seconds').onchange    = (e) => this._updateConfig('show_seconds', e.target.checked);
+    // Display style
+    ['ring', 'digits'].forEach(v => {
+      const el = root.getElementById('ds_' + v);
+      if (el) el.onchange = () => this._updateConfig('display_style', v);
+    });
+
+    // Toggles
+    root.getElementById('show_seconds').onchange = (e) => this._updateConfig('show_seconds', e.target.checked);
+
+    root.getElementById('show_name').onchange = (e) => {
+      this._updateConfig('show_name', e.target.checked);
+      const row = root.getElementById('customNameRow');
+      if (row) row.style.display = e.target.checked ? '' : 'none';
+    };
+
     root.getElementById('use_glassmorphism').onchange = (e) => this._updateConfig('use_glassmorphism', e.target.checked);
+
+    // Custom name — debounced on input
+    const customNameInput = root.getElementById('custom_name');
+    let nameDebounce;
+    customNameInput.addEventListener('input', () => {
+      clearTimeout(nameDebounce);
+      nameDebounce = setTimeout(() => this._updateConfig('custom_name', customNameInput.value), 300);
+    });
   }
 
   _filterList(term) {
     const lower = term.toLowerCase();
     this.shadowRoot.querySelectorAll('.entity-option').forEach(opt => {
-      const text = opt.textContent.toLowerCase();
-      opt.style.display = text.includes(lower) ? '' : 'none';
+      opt.style.display = opt.textContent.toLowerCase().includes(lower) ? '' : 'none';
     });
   }
 
   _buildColourPickers() {
     const COLOUR_FIELDS = [
-      { key: 'accent_color', label: 'Accent / Ring',    desc: 'Progress ring and active state colour',              default: '#FF9F0A', maxlen: 7 },
-      { key: 'text_color',   label: 'Text Colour',      desc: 'Time digits and name label colour',                  default: '#ffffff', maxlen: 7 },
-      { key: 'card_bg',      label: 'Card Background',  desc: '#000000 = transparent · 8-digit hex for opacity',    default: '#1c1c1e', maxlen: 9 },
+      { key: 'accent_color', label: 'Accent / Ring',   desc: 'Progress ring and active state colour',           default: '#FF9F0A', maxlen: 7 },
+      { key: 'text_color',   label: 'Text Colour',     desc: 'Time digits and name label colour',               default: '#ffffff', maxlen: 7 },
+      { key: 'card_bg',      label: 'Card Background', desc: '#000000 = transparent · 8-digit hex for opacity', default: '#1c1c1e', maxlen: 9 },
     ];
 
     const grid = this.shadowRoot.getElementById('colour-grid');
@@ -748,8 +812,20 @@ class CougarCountdownCardEditor extends HTMLElement {
     const searchInput = root.getElementById('entitySearch');
     if (searchInput && this._config.entity) searchInput.value = this._config.entity;
 
+    const dsEl = root.getElementById('ds_' + (this._config.display_style || 'ring'));
+    if (dsEl) dsEl.checked = true;
+
     const showSecs = root.getElementById('show_seconds');
     if (showSecs) showSecs.checked = this._config.show_seconds !== false;
+
+    const showName = root.getElementById('show_name');
+    if (showName) showName.checked = this._config.show_name !== false;
+
+    const customNameRow = root.getElementById('customNameRow');
+    if (customNameRow) customNameRow.style.display = this._config.show_name === false ? 'none' : '';
+
+    const customNameInput = root.getElementById('custom_name');
+    if (customNameInput) customNameInput.value = this._config.custom_name || '';
 
     const useGlass = root.getElementById('use_glassmorphism');
     if (useGlass) useGlass.checked = this._config.use_glassmorphism !== false;
